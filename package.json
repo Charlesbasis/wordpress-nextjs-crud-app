@@ -1,0 +1,27 @@
+{
+  "name": "wordpress-nextjs-crud-app",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"bun run dev:wordpress\" \"bun run dev:nextjs\"",
+    "dev:wordpress": "docker compose up",
+    "dev:nextjs": "cd apps/nextjs && bun run dev",
+    "build": "bun run build:shared && bun run build:nextjs",
+    "build:shared": "cd packages/shared && bun run build",
+    "build:nextjs": "cd apps/nextjs && bun run build",
+    "start": "cd apps/nextjs && bun run start",
+    "clean": "rm -rf node_modules && find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +",
+    "wp": "docker compose exec wordpress wp"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.1.18"
+  }
+}
