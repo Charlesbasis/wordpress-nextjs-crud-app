@@ -3,7 +3,7 @@
  * Plugin Name: Product CRUD
  * Plugin URI: https://example.com/product-crud
  * Description: Custom product management with REST API support
- * Version: 1.0.0
+ * Version: 1.0.2
  * Author: CVHowlader
  * License: GPL-2.0+
  * Text Domain: product-crud
@@ -20,9 +20,12 @@ class Product_CRUD {
         add_action('init', array($this, 'register_product_post_type'));
         add_action('rest_api_init', array($this, 'register_rest_fields'));
         
-        // Add meta boxes
+        // Add meta boxes for admin
         add_action('add_meta_boxes', array($this, 'add_product_meta_boxes'));
         add_action('save_post_product', array($this, 'save_product_meta'));
+        
+        // Handle meta fields on REST API save
+        add_action('rest_insert_product', array($this, 'save_product_meta_rest'), 10, 3);
     }
     
     /**
@@ -58,9 +61,9 @@ class Product_CRUD {
             'hierarchical'       => false,
             'menu_position'      => null,
             'menu_icon'          => 'dashicons-products',
-            'supports'           => array('title', 'editor', 'thumbnail', 'excerpt'),
-            'show_in_rest'       => true, // Enable REST API
-            'rest_base'           => 'products',
+            'supports'           => array('title', 'editor', 'thumbnail', 'excerpt', 'custom-fields'),
+            'show_in_rest'       => true,
+            'rest_base'          => 'products',
             'rest_controller_class' => 'WP_REST_Posts_Controller',
         );
         
@@ -85,14 +88,11 @@ class Product_CRUD {
      * Display product details meta box
      */
     public function product_details_meta_box($post) {
-        // Add nonce for security
         wp_nonce_field('product_meta_box', 'product_meta_box_nonce');
         
-        // Get current values
         $price = get_post_meta($post->ID, '_product_price', true);
         $sku = get_post_meta($post->ID, '_product_sku', true);
         $stock = get_post_meta($post->ID, '_product_stock', true);
-        
         ?>
         <table class="form-table">
             <tr>
@@ -110,7 +110,6 @@ class Product_CRUD {
                         style="width: 100%; max-width: 300px;"
                         placeholder="0.00"
                     />
-                    <p class="description"><?php _e('Enter the product price.', 'product-crud'); ?></p>
                 </td>
             </tr>
             <tr>
@@ -126,7 +125,6 @@ class Product_CRUD {
                         style="width: 100%; max-width: 300px;"
                         placeholder="PRODUCT-001"
                     />
-                    <p class="description"><?php _e('Enter the product SKU (Stock Keeping Unit).', 'product-crud'); ?></p>
                 </td>
             </tr>
             <tr>
@@ -143,7 +141,6 @@ class Product_CRUD {
                         style="width: 100%; max-width: 300px;"
                         placeholder="0"
                     />
-                    <p class="description"><?php _e('Enter the stock quantity.', 'product-crud'); ?></p>
                 </td>
             </tr>
         </table>
@@ -151,45 +148,70 @@ class Product_CRUD {
     }
     
     /**
-     * Save product meta data
+     * Save product meta data (from admin)
      */
     public function save_product_meta($post_id) {
-        // Check if nonce is set
         if (!isset($_POST['product_meta_box_nonce'])) {
             return;
         }
         
-        // Verify nonce
         if (!wp_verify_nonce($_POST['product_meta_box_nonce'], 'product_meta_box')) {
             return;
         }
         
-        // Check if this is an autosave
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
             return;
         }
         
-        // Check user permissions
         if (!current_user_can('edit_post', $post_id)) {
             return;
         }
         
         // Save price
         if (isset($_POST['product_price'])) {
-            $price = sanitize_text_field($_POST['product_price']);
-            update_post_meta($post_id, '_product_price', $price ? floatval($price) : '');
+            update_post_meta($post_id, '_product_price', floatval($_POST['product_price']));
         }
         
         // Save SKU
         if (isset($_POST['product_sku'])) {
-            $sku = sanitize_text_field($_POST['product_sku']);
-            update_post_meta($post_id, '_product_sku', $sku);
+            update_post_meta($post_id, '_product_sku', sanitize_text_field($_POST['product_sku']));
         }
         
         // Save stock
         if (isset($_POST['product_stock'])) {
-            $stock = sanitize_text_field($_POST['product_stock']);
-            update_post_meta($post_id, '_product_stock', $stock ? intval($stock) : '');
+            update_post_meta($post_id, '_product_stock', intval($_POST['product_stock']));
+        }
+    }
+    
+    /**
+     * Save product meta data from REST API
+     */
+    public function save_product_meta_rest($post, $request, $creating) {
+        $params = $request->get_params();
+        
+        // Check if meta fields are in the request
+        if (isset($params['meta'])) {
+            // Save from meta object
+            if (isset($params['meta']['_product_price'])) {
+                update_post_meta($post->ID, '_product_price', floatval($params['meta']['_product_price']));
+            }
+            if (isset($params['meta']['_product_sku'])) {
+                update_post_meta($post->ID, '_product_sku', sanitize_text_field($params['meta']['_product_sku']));
+            }
+            if (isset($params['meta']['_product_stock'])) {
+                update_post_meta($post->ID, '_product_stock', intval($params['meta']['_product_stock']));
+            }
+        }
+        
+        // Also check top-level fields
+        if (isset($params['price'])) {
+            update_post_meta($post->ID, '_product_price', floatval($params['price']));
+        }
+        if (isset($params['sku'])) {
+            update_post_meta($post->ID, '_product_sku', sanitize_text_field($params['sku']));
+        }
+        if (isset($params['stock'])) {
+            update_post_meta($post->ID, '_product_stock', intval($params['stock']));
         }
     }
     
@@ -201,10 +223,11 @@ class Product_CRUD {
         register_rest_field('product', 'price', array(
             'get_callback' => function($post) {
                 $price = get_post_meta($post['id'], '_product_price', true);
-                return $price !== '' ? floatval($price) : null;
+                return $price !== '' ? floatval($price) : 0;
             },
             'update_callback' => function($value, $post) {
-                return update_post_meta($post->ID, '_product_price', $value !== null ? floatval($value) : '');
+                update_post_meta($post->ID, '_product_price', floatval($value));
+                return true;
             },
             'schema' => array(
                 'type' => 'number',
@@ -216,10 +239,12 @@ class Product_CRUD {
         // Register SKU field
         register_rest_field('product', 'sku', array(
             'get_callback' => function($post) {
-                return get_post_meta($post['id'], '_product_sku', true);
+                $sku = get_post_meta($post['id'], '_product_sku', true);
+                return $sku !== '' ? $sku : '';
             },
             'update_callback' => function($value, $post) {
-                return update_post_meta($post->ID, '_product_sku', sanitize_text_field($value));
+                update_post_meta($post->ID, '_product_sku', sanitize_text_field($value));
+                return true;
             },
             'schema' => array(
                 'type' => 'string',
@@ -232,13 +257,14 @@ class Product_CRUD {
         register_rest_field('product', 'stock', array(
             'get_callback' => function($post) {
                 $stock = get_post_meta($post['id'], '_product_stock', true);
-                return $stock !== '' ? intval($stock) : null;
+                return $stock !== '' ? intval($stock) : 0;
             },
             'update_callback' => function($value, $post) {
-                return update_post_meta($post->ID, '_product_stock', $value !== null ? intval($value) : '');
+                update_post_meta($post->ID, '_product_stock', intval($value));
+                return true;
             },
             'schema' => array(
-                'type' => 'number',
+                'type' => 'integer',
                 'description' => 'Product stock quantity',
                 'context' => array('view', 'edit'),
             ),

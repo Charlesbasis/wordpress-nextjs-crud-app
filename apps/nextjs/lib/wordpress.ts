@@ -6,12 +6,10 @@ import type {
   PaginatedResponse
 } from '@product-crud-pwa/shared'
 
-// Use Next.js API route as proxy to avoid CORS issues
 const API_BASE = typeof window !== 'undefined' 
-  ? '/api/wordpress'  // Client-side: use Next.js API proxy
-  : `${process.env.WORDPRESS_URL || 'http://localhost:8080'}/wp-json`  // Server-side: direct connection
+  ? '/api/wordpress'
+  : `${process.env.WORDPRESS_URL || 'http://localhost:8080'}/wp-json`
 
-// Create axios instance
 export const wpApi = axios.create({
   baseURL: API_BASE,
   timeout: 10000,
@@ -24,7 +22,6 @@ export const wpApi = axios.create({
 // Add request interceptor for auth
 wpApi.interceptors.request.use(
   (config) => {
-    // In browser, add token from localStorage
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('wp_token')
       if (token) {
@@ -36,22 +33,23 @@ wpApi.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
-// Add response interceptor for error handling
+// Enhanced response interceptor
 wpApi.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
+      console.error('❌ 401 Unauthorized')
       if (typeof window !== 'undefined') {
         localStorage.removeItem('wp_token')
-        // window.location.href = '/login'
+        localStorage.removeItem('wp_user')
+        window.location.href = '/login?error=session_expired'
       }
     }
     return Promise.reject(error)
   }
 )
 
-// Helper function to map WordPress REST API response to Product interface
+// Helper function to map WordPress response
 function mapWordPressProductToProduct(wpProduct: any): Product {
   return {
     id: wpProduct.id,
@@ -64,9 +62,9 @@ function mapWordPressProductToProduct(wpProduct: any): Product {
   }
 }
 
-// Cache layer for better performance
+// Cache layer
 const cache = new Map<string, { data: any; timestamp: number }>()
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL = 5 * 60 * 1000
 
 const getFromCache = <T>(key: string): T | null => {
   const cached = cache.get(key)
@@ -80,7 +78,7 @@ const setToCache = (key: string, data: any) => {
   cache.set(key, { data, timestamp: Date.now() })
 }
 
-// Products API with caching
+// Products API
 export const productApi = {
   getProducts: async (
     page: number = 1,
@@ -96,18 +94,14 @@ export const productApi = {
     const cacheKey = `products_${page}_${perPage}_${JSON.stringify(filters)}`
     const cached = getFromCache<PaginatedResponse<Product>>(cacheKey)
     
-    if (cached) {
-      return cached
-    }
+    if (cached) return cached
 
-    // Fix: Convert all values to strings for URLSearchParams
     const params = new URLSearchParams({
       page: page.toString(),
       per_page: perPage.toString(),
       _embed: 'true',
     })
     
-    // Add filter params as strings
     if (filters) {
       if (filters.search) params.append('search', filters.search)
       if (filters.category !== undefined) params.append('category', filters.category.toString())
@@ -117,13 +111,10 @@ export const productApi = {
     }
 
     const response = await wpApi.get(`/wp/v2/products?${params}`)
-    
-    // Map WordPress response to Product interface
     const products = Array.isArray(response.data) 
       ? response.data.map(mapWordPressProductToProduct)
       : []
     
-    // Fix: Match PaginatedResponse structure
     const result: PaginatedResponse<Product> = {
       data: products,
       total: parseInt(response.headers['x-wp-total'] || '0', 10),
@@ -137,10 +128,7 @@ export const productApi = {
   getProduct: async (id: number): Promise<Product> => {
     const cacheKey = `product_${id}`
     const cached = getFromCache<Product>(cacheKey)
-    
-    if (cached) {
-      return cached
-    }
+    if (cached) return cached
 
     const response = await wpApi.get(`/wp/v2/products/${id}`, {
       params: { _embed: 'true' }
@@ -151,105 +139,86 @@ export const productApi = {
     return product
   },
 
-  getProductBySlug: async (slug: string): Promise<Product> => {
-    const cacheKey = `product_slug_${slug}`
-    const cached = getFromCache<Product>(cacheKey)
-    
-    if (cached) {
-      return cached
-    }
-
-    const response = await wpApi.get('/wp/v2/products', {
-      params: {
-        slug,
-        _embed: 'true'
-      }
-    })
-
-    if (response.data[0]) {
-      const product = mapWordPressProductToProduct(response.data[0])
-      setToCache(cacheKey, product)
-      return product
-    }
-    
-    throw new Error('Product not found')
-  },
-
-  searchProducts: async (query: string): Promise<Product[]> => {
-    const response = await wpApi.get('/wp/v2/products', {
-      params: {
-        search: query,
-        per_page: '10',
-        _embed: 'true'
-      }
-    })
-    return Array.isArray(response.data) 
-      ? response.data.map(mapWordPressProductToProduct)
-      : []
-  },
-
   createProduct: async (data: ProductCreateDto): Promise<Product> => {
-    // console.log('data:', data)
-    // Clear relevant caches
     cache.clear()
     
-    // Map to WordPress format
-    const wpData: any = {
+    console.log('📝 Creating product with data:', data)
+    
+    // FIXED: Use the correct format for meta fields
+    // WordPress now supports direct meta field updates via register_post_meta
+    const wpData = {
       title: data.title,
       content: data.content || '',
       excerpt: data.excerpt || '',
       status: data.status || 'publish',
+      // Use the meta object to set custom fields
+      meta: {
+        _product_price: data.price,
+        _product_sku: data.sku,
+        _product_stock: data.stock,
+      },
+      // Also send them as top-level fields for backward compatibility
+      price: data.price,
+      sku: data.sku,
+      stock: data.stock,
     }
     
-    const response = await wpApi.post('/wp/v2/products', wpData)
-
-    // console.log('response:', response)
-    
-    // Save custom fields
-    const productId = response.data.id
-    if (productId) {
-      await Promise.all([
-        wpApi.post(`/wp/v2/products/${productId}`, { price: data.price }),
-        wpApi.post(`/wp/v2/products/${productId}`, { sku: data.sku }),
-        wpApi.post(`/wp/v2/products/${productId}`, { stock: data.stock }),
-      ])
+    try {
+      const response = await wpApi.post('/wp/v2/products', wpData)
+      console.log('✅ Product created:', response.data)
+      
+      // Fetch the complete product to ensure we have all data
+      const product = await productApi.getProduct(response.data.id)
+      console.log('✅ Product fetched with meta:', product)
+      
+      return product
+    } catch (error: any) {
+      console.error('❌ Create product error:', error.response?.data || error.message)
+      throw error
     }
-    
-    // Fetch the complete product
-    return productApi.getProduct(productId)
   },
 
   updateProduct: async (id: number, data: ProductUpdateDto): Promise<Product> => {
     cache.delete(`product_${id}`)
     
-    // Map to WordPress format
-    const wpData: any = {}
+    console.log('📝 Updating product:', id, data)
+    
+    const wpData: any = {
+      meta: {}
+    }
+    
+    // Update post fields
     if (data.title) wpData.title = data.title
     if (data.content !== undefined) wpData.content = data.content
     if (data.excerpt !== undefined) wpData.excerpt = data.excerpt
     if (data.status) wpData.status = data.status
     
-    // Update post first
-    if (Object.keys(wpData).length > 0) {
-      await wpApi.post(`/wp/v2/products/${id}`, wpData)
-    }
-    
-    // Update custom fields
-    const updates: Promise<any>[] = []
+    // Update meta fields
     if (data.price !== undefined) {
-      updates.push(wpApi.post(`/wp/v2/products/${id}`, { price: data.price }))
+      wpData.meta._product_price = data.price
+      wpData.price = data.price // Also send as top-level field
     }
     if (data.sku !== undefined) {
-      updates.push(wpApi.post(`/wp/v2/products/${id}`, { sku: data.sku }))
+      wpData.meta._product_sku = data.sku
+      wpData.sku = data.sku
     }
     if (data.stock !== undefined) {
-      updates.push(wpApi.post(`/wp/v2/products/${id}`, { stock: data.stock }))
+      wpData.meta._product_stock = data.stock
+      wpData.stock = data.stock
     }
     
-    await Promise.all(updates)
-    
-    // Fetch the updated product
-    return productApi.getProduct(id)
+    try {
+      const response = await wpApi.post(`/wp/v2/products/${id}`, wpData)
+      console.log('✅ Product updated:', response.data)
+      
+      const product = await productApi.getProduct(id)
+      console.log('✅ Product fetched after update:', product)
+      
+      return product
+    } catch (error: any) {
+      console.error('❌ Update product error:', error.response?.data || error.message)
+      throw error
+    }
   },
 
   deleteProduct: async (id: number): Promise<void> => {
@@ -258,28 +227,63 @@ export const productApi = {
       params: { force: true }
     })
   },
+}
 
-  uploadMedia: async (file: File): Promise<any> => {
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const response = await wpApi.post('/wp/v2/media', formData, {
-      headers: {
-        'Content-Disposition': `attachment; filename="${file.name}"`,
-        'Content-Type': file.type
+// Auth API
+export const authApi = {
+  login: async (username: string, password: string) => {
+    try {
+      console.log('🔐 Attempting login...')
+      const response = await wpApi.post('/jwt-auth/v1/token', {
+        username,
+        password
+      })
+      
+      if (response.data.token) {
+        console.log('✅ Login successful')
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('wp_token', response.data.token)
+          localStorage.setItem('wp_user', JSON.stringify({
+            email: response.data.user_email,
+            nicename: response.data.user_nicename,
+            displayName: response.data.user_display_name,
+          }))
+          wpApi.defaults.headers.common.Authorization = `Bearer ${response.data.token}`
+        }
       }
-    })
+      
+      return response.data
+    } catch (error: any) {
+      console.error('❌ Login failed:', error.response?.data || error.message)
+      throw error
+    }
+  },
 
-    return response.data
+  logout: () => {
+    console.log('👋 Logging out...')
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('wp_token')
+      localStorage.removeItem('wp_user')
+      delete wpApi.defaults.headers.common.Authorization
+    }
+  },
+
+  isAuthenticated: (): boolean => {
+    if (typeof window === 'undefined') return false
+    return !!localStorage.getItem('wp_token')
+  },
+
+  getUser: () => {
+    if (typeof window === 'undefined') return null
+    const userStr = localStorage.getItem('wp_user')
+    return userStr ? JSON.parse(userStr) : null
   }
 }
 
-// SWR hooks for data fetching
+// SWR hooks
 import useSWR from 'swr'
-import useSWRInfinite from 'swr/infinite'
 
 const fetcher = (url: string) => wpApi.get(url).then(res => {
-  // Map response for SWR hooks too
   if (Array.isArray(res.data)) {
     return res.data.map(mapWordPressProductToProduct)
   }
@@ -287,7 +291,6 @@ const fetcher = (url: string) => wpApi.get(url).then(res => {
 })
 
 export const useProducts = (page: number = 1, filters?: any) => {
-  // Fix: Convert filters to string values
   const params = new URLSearchParams({
     page: page.toString(),
     per_page: '12',
@@ -308,67 +311,8 @@ export const useProducts = (page: number = 1, filters?: any) => {
   })
 }
 
-export const useInfiniteProducts = (filters?: any) => {
-  const getKey = (pageIndex: number, previousPageData: any) => {
-    if (previousPageData && !previousPageData.length) return null
-    
-    const params = new URLSearchParams({
-      page: (pageIndex + 1).toString(),
-      per_page: '12',
-      _embed: 'true',
-    })
-    
-    // Fix: Convert filters to string values
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(key, String(value))
-        }
-      })
-    }
-    
-    return `/wp/v2/products?${params}`
-  }
-
-  return useSWRInfinite(getKey, fetcher, {
-    revalidateFirstPage: false,
-    parallel: true
-  })
-}
-
 export const useProduct = (id?: number) => {
   return useSWR(id ? `/wp/v2/products/${id}?_embed=true` : null, fetcher, {
     revalidateOnFocus: false
   })
-}
-
-// Auth API
-export const authApi = {
-  login: async (username: string, password: string) => {
-    const response = await wpApi.post('/jwt-auth/v1/token', {
-      username,
-      password
-    })
-    
-    if (response.data.token) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('wp_token', response.data.token)
-        wpApi.defaults.headers.common.Authorization = `Bearer ${response.data.token}`
-      }
-    }
-    
-    return response.data
-  },
-
-  logout: () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('wp_token')
-      delete wpApi.defaults.headers.common.Authorization
-    }
-  },
-
-  isAuthenticated: (): boolean => {
-    if (typeof window === 'undefined') return false
-    return !!localStorage.getItem('wp_token')
-  }
 }
