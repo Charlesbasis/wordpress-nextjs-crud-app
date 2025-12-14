@@ -62,6 +62,8 @@ async function handleWordPressRequest(
     const data = await response.json()
     const headers = new Headers()
     
+    headers.set('Cache-Control', 's-maxage=300, stale-while-revalidate=600')
+    
     // Copy relevant headers
     if (response.headers.get('x-wp-total')) {
       headers.set('x-wp-total', response.headers.get('x-wp-total') || '')

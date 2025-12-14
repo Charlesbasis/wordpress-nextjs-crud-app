@@ -142,7 +142,7 @@ export const productApi = {
   createProduct: async (data: ProductCreateDto): Promise<Product> => {
     cache.clear()
     
-    console.log('📝 Creating product with data:', data)
+    // console.log('📝 Creating product with data:', data)
     
     // FIXED: Use the correct format for meta fields
     // WordPress now supports direct meta field updates via register_post_meta
@@ -165,11 +165,11 @@ export const productApi = {
     
     try {
       const response = await wpApi.post('/wp/v2/products', wpData)
-      console.log('✅ Product created:', response.data)
+      // console.log('✅ Product created:', response.data)
       
       // Fetch the complete product to ensure we have all data
       const product = await productApi.getProduct(response.data.id)
-      console.log('✅ Product fetched with meta:', product)
+      // console.log('✅ Product fetched with meta:', product)
       
       return product
     } catch (error: any) {
@@ -181,7 +181,7 @@ export const productApi = {
   updateProduct: async (id: number, data: ProductUpdateDto): Promise<Product> => {
     cache.delete(`product_${id}`)
     
-    console.log('📝 Updating product:', id, data)
+    // console.log('📝 Updating product:', id, data)
     
     const wpData: any = {
       meta: {}
@@ -209,10 +209,10 @@ export const productApi = {
     
     try {
       const response = await wpApi.post(`/wp/v2/products/${id}`, wpData)
-      console.log('✅ Product updated:', response.data)
+      // console.log('✅ Product updated:', response.data)
       
       const product = await productApi.getProduct(id)
-      console.log('✅ Product fetched after update:', product)
+      // console.log('✅ Product fetched after update:', product)
       
       return product
     } catch (error: any) {
@@ -307,12 +307,15 @@ export const useProducts = (page: number = 1, filters?: any) => {
 
   return useSWR(`/wp/v2/products?${params}`, fetcher, {
     revalidateOnFocus: false,
-    dedupingInterval: 60000
+    dedupingInterval: 5000,
+    revalidateOnReconnect: true,
   })
 }
 
 export const useProduct = (id?: number) => {
   return useSWR(id ? `/wp/v2/products/${id}?_embed=true` : null, fetcher, {
-    revalidateOnFocus: false
+    revalidateOnFocus: false,
+    dedupingInterval: 5000,
+    revalidateOnReconnect: true,
   })
 }

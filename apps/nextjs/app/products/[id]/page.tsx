@@ -86,3 +86,14 @@ export default async function ProductPage({ params }: Props) {
     </>
   )
 }
+
+export const revalidate = 1800 // 30 minutes
+
+export async function generateStaticParams() {
+  // Pre-generate top 50 products at build time
+  const products = await productApi.getProducts(1, 50)
+  
+  return products.data.map((product) => ({
+    id: product.id.toString(),
+  }))
+}

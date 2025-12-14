@@ -36,10 +36,8 @@ services:
         define('WP_DEBUG_DISPLAY', false);
         define('SCRIPT_DEBUG', true);
     volumes:
-      - ./wp-content:/var/www/html/wp-content
+      - ./wp-content:/var/www/html/wp-content  # ✅ ONLY THIS LINE
       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
-      - ./plugins:/var/www/html/wp-content/plugins
-      - ./themes:/var/www/html/wp-content/themes
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
       interval: 30s
@@ -52,13 +50,10 @@ services:
     depends_on:
       - db
       - wordpress
-    network_mode: service:wordpress  # Share network with wordpress container
+    network_mode: service:wordpress
     volumes:
-      - ./wp-content:/var/www/html/wp-content
-      - ./plugins:/var/www/html/wp-content/plugins
-      - ./themes:/var/www/html/wp-content/themes
+      - ./wp-content:/var/www/html/wp-content  # ✅ ONLY THIS LINE
       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
-
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: wordpress
@@ -67,3 +62,4 @@ services:
 
 volumes:
   db_data:
+  

@@ -1,5 +1,28 @@
+# Node
 node_modules
 bun.lock
-.env.local
 .next
+
+# Environment
+.env.local
+.env.production
+
+# Logs
 debug.log
+*.log
+
+# WordPress uploads (but keep plugins & themes in git)
+wp-content/uploads/
+wp-content/cache/
+wp-content/backup/
+wp-content/upgrade/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+
+litespeed-cache
