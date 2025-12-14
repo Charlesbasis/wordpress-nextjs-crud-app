@@ -2,3 +2,4 @@ node_modules
 bun.lock
 .env.local
 .next
+debug.log

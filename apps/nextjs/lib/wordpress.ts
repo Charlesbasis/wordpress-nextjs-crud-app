@@ -44,7 +44,7 @@ wpApi.interceptors.response.use(
       // Clear token and redirect to login
       if (typeof window !== 'undefined') {
         localStorage.removeItem('wp_token')
-        window.location.href = '/login'
+        // window.location.href = '/login'
       }
     }
     return Promise.reject(error)
@@ -189,6 +189,7 @@ export const productApi = {
   },
 
   createProduct: async (data: ProductCreateDto): Promise<Product> => {
+    // console.log('data:', data)
     // Clear relevant caches
     cache.clear()
     
@@ -201,6 +202,8 @@ export const productApi = {
     }
     
     const response = await wpApi.post('/wp/v2/products', wpData)
+
+    // console.log('response:', response)
     
     // Save custom fields
     const productId = response.data.id

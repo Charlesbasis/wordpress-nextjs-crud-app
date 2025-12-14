@@ -57,6 +57,8 @@ services:
       - ./wp-content:/var/www/html/wp-content
       - ./plugins:/var/www/html/wp-content/plugins
       - ./themes:/var/www/html/wp-content/themes
+      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: wordpress
